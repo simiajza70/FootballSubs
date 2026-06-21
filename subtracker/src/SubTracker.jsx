@@ -31,6 +31,23 @@ const SEED_PLAYERS = (function(){
   return arr;
 })();
 
+// App version, shown in Settings. Format: Major.Minor.
+// Bumped on every update to this file: +0.1 (minor) for normal changes,
+// or +1.0 with minor reset to 0 for a major update (only when explicitly
+// requested).
+const APP_VERSION = "1.1";
+
+// Changelog, newest first. Add a new entry at the TOP every time APP_VERSION
+// is bumped, describing what changed in that version.
+const CHANGELOG = [
+  { version: "1.1", date: "2026-06-21", changes: [
+    "Added this changelog -- click the version number in Settings to view it."
+  ] },
+  { version: "1.0", date: "2026-06-21", changes: [
+    "Introduced app version tracking."
+  ] },
+];
+
 const DRAW_COLORS = ["#ffffff","#ef4444","#f59e0b","#22c55e","#3b82f6","#a855f7","#ec4899","#000000"];
 const DRAW_SIZES  = [2, 4, 8, 14];
 const TOOLS       = ["pen","line","arrow","rect","circle","text","eraser"];
@@ -631,6 +648,7 @@ function SubTrackerApp(props) {
   function askConfirm(message, onConfirm) {
     setConfirmDialog({ message: message, onConfirm: onConfirm });
   }
+  var _changelogOpen = useState(false); var changelogOpen = _changelogOpen[0], setChangelogOpen = _changelogOpen[1];
 
   // Switch the active team and reload, so every piece of state re-initializes
   // from that team's namespaced localStorage data.
@@ -4495,7 +4513,15 @@ function SubTrackerApp(props) {
       {/* ---- SETTINGS TAB ---- */}
       {tab==="settings" && (
         <div style={{ padding:16, maxWidth:480, margin:"0 auto" }}>
-          <div style={{ fontSize:15, fontWeight:700, marginBottom:14 }}>Settings</div>
+          <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:14 }}>
+            <div style={{ fontSize:15, fontWeight:700 }}>Settings</div>
+            <button onClick={function(){setChangelogOpen(true);}} title="View changelog"
+              style={{ fontSize:11, color:"#475569", fontFamily:"monospace", background:"transparent", border:"1px solid #334155", borderRadius:5, padding:"1px 7px", cursor:"pointer" }}
+              onMouseEnter={function(e){e.currentTarget.style.color="#94a3b8";e.currentTarget.style.borderColor="#475569";}}
+              onMouseLeave={function(e){e.currentTarget.style.color="#475569";e.currentTarget.style.borderColor="#334155";}}>
+              v{APP_VERSION}
+            </button>
+          </div>
           <div style={{ background:"#1e293b", borderRadius:10, padding:16, border:"1px solid #334155", marginBottom:14 }}>
             <div style={{ fontSize:12, fontWeight:700, marginBottom:6 }}>Pitch layout</div>
             <div style={{ fontSize:11, color:"#64748b", marginBottom:10 }}>Click any position marker on the pitch to reposition it.</div>
@@ -4675,6 +4701,37 @@ function SubTrackerApp(props) {
                 style={{ flex:1, padding:"9px", borderRadius:8, border:"1px solid #334155", background:"transparent", color:"#94a3b8", fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
                 Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Changelog modal -- opened by clicking the version number in Settings */}
+      {changelogOpen && (
+        <div onClick={function(){setChangelogOpen(false);}} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.65)", zIndex:500, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div onClick={function(e){e.stopPropagation();}} style={{ background:"#1e293b", border:"1px solid #334155", borderRadius:12, padding:20, maxWidth:440, width:"100%", maxHeight:"75vh", display:"flex", flexDirection:"column", boxShadow:"0 16px 48px rgba(0,0,0,0.7)" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, flexShrink:0 }}>
+              <div style={{ fontSize:14, fontWeight:700, color:"#f8fafc" }}>Changelog</div>
+              <button onClick={function(){setChangelogOpen(false);}} style={{ width:26, height:26, borderRadius:7, border:"1px solid #334155", background:"transparent", color:"#94a3b8", cursor:"pointer", fontSize:14, fontFamily:"inherit" }}>X</button>
+            </div>
+            <div style={{ overflowY:"auto", flex:1 }}>
+              {CHANGELOG.map(function(entry, i){
+                return (
+                  <div key={entry.version} style={{ marginBottom: i < CHANGELOG.length-1 ? 16 : 0 }}>
+                    <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:6 }}>
+                      <div style={{ fontSize:12, fontWeight:700, color: i===0 ? "#34d399" : "#cbd5e1", fontFamily:"monospace" }}>v{entry.version}</div>
+                      <div style={{ fontSize:10, color:"#475569" }}>{entry.date}</div>
+                      {i===0 && <div style={{ fontSize:8, fontWeight:700, color:"#34d399", background:"rgba(29,158,117,0.15)", border:"1px solid #1D9E75", borderRadius:4, padding:"1px 6px", textTransform:"uppercase", letterSpacing:"0.04em" }}>Current</div>}
+                    </div>
+                    <ul style={{ margin:0, paddingLeft:18, display:"flex", flexDirection:"column", gap:3 }}>
+                      {entry.changes.map(function(c, ci){
+                        return <li key={ci} style={{ fontSize:11, color:"#94a3b8", lineHeight:1.5 }}>{c}</li>;
+                      })}
+                    </ul>
+                    {i < CHANGELOG.length-1 && <div style={{ borderBottom:"1px solid #334155", marginTop:14 }} />}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
