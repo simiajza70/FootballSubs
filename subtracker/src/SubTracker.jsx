@@ -23,16 +23,13 @@ const POSITION_LINE = { GK:"gk", LB:"def", CB:"def", RB:"def", LM:"mid", CM:"mid
 // The unique position labels used for the player rating sliders (10 categories)
 const POSITION_LABELS = ["GK","LB","CB","RB","LM","CM","RM","LW","ST","RW"];
 
-const SEED_PLAYERS = [
-  { name: "Alex Morgan",  jersey_number: 1,  default_position: "GK"  },
-  { name: "Jordan Smith", jersey_number: 5,  default_position: "DEF" },
-  { name: "Sam Lee",      jersey_number: 7,  default_position: "MID" },
-  { name: "Chris Park",   jersey_number: 10, default_position: "FWD" },
-  { name: "Taylor Reyes", jersey_number: 11, default_position: "MID" },
-  { name: "Casey White",  jersey_number: 14, default_position: "DEF" },
-  { name: "Robin James",  jersey_number: 17, default_position: "FWD" },
-  { name: "Drew Ellis",   jersey_number: 9,  default_position: "MID" },
-];
+const SEED_PLAYERS = (function(){
+  var arr = [];
+  for (var i = 1; i <= 15; i++) {
+    arr.push({ name: "Player " + i, jersey_number: i, default_position: i === 1 ? "GK" : "MID" });
+  }
+  return arr;
+})();
 
 const DRAW_COLORS = ["#ffffff","#ef4444","#f59e0b","#22c55e","#3b82f6","#a855f7","#ec4899","#000000"];
 const DRAW_SIZES  = [2, 4, 8, 14];
@@ -77,7 +74,7 @@ function migrateToMultiTeam() {
       teamObj.id = teamId;
     } else {
       teamId = uid();
-      teamObj = { id: teamId, name: "My Team", season: String(new Date().getFullYear()), coach_name: "", created_at: new Date().toISOString() };
+      teamObj = { id: teamId, name: "Demo", season: String(new Date().getFullYear()), coach_name: "", created_at: new Date().toISOString() };
     }
     PER_TEAM_LS_KEYS.forEach(function(k){
       var v = localStorage.getItem(k);
@@ -92,7 +89,7 @@ migrateToMultiTeam();
 
 function initStorage() {
   if (!LS.get("st_team")) {
-    LS.set("st_team", { id: uid(), name: "My Team", season: String(new Date().getFullYear()), coach_name: "", created_at: new Date().toISOString() });
+    LS.set("st_team", { id: uid(), name: "Demo", season: String(new Date().getFullYear()), coach_name: "", created_at: new Date().toISOString() });
   }
   if (!LS.get("st_players")) {
     const team = LS.get("st_team");
@@ -266,7 +263,7 @@ function PitchMenu(props) {
   return (
     <div>
       <div onClick={onClose} style={{ position:"absolute", inset:0, zIndex:30 }} />
-      <div onClick={function(e){e.stopPropagation();}} style={{ position:"absolute", left:x+"%", top:y+"%", transform:"translate("+(flipX?"-110%":"8px")+","+(flipY?"calc(-100% - 44px)":"8px")+")", zIndex:40, background:"#0f172a", border:"1px solid #334155", borderRadius:10, padding:6, minWidth:155, boxShadow:"0 8px 32px rgba(0,0,0,0.65)" }}>
+      <div onClick={function(e){e.stopPropagation();}} style={{ position:"absolute", left:x+"%", top:y+"%", transform:"translate("+(flipX?"-110%":"8px")+","+(flipY?"calc(-100% - 44px)":"8px")+")", zIndex:40, background:"#0f172a", border:"1px solid #334155", borderRadius:10, padding:6, minWidth:155, maxWidth:220, maxHeight:"60vh", overflowY:"auto", boxShadow:"0 8px 32px rgba(0,0,0,0.65)" }}>
         {items.map(function(item, i) {
           if (item.divider) return <div key={i} style={{ fontSize:9, color:"#475569", padding:"4px 8px 2px", fontWeight:700, textTransform:"uppercase", letterSpacing:"0.07em" }}>{item.label}</div>;
           return (
@@ -520,7 +517,13 @@ function Whiteboard(props) {
 
 // ---- Main App ----
 
-function SubTrackerApp() {
+function SubTrackerApp(props) {
+  // Calling window.location.reload() is restricted/can hang inside the sandboxed
+  // Claude.ai artifact preview iframe. Instead, "reloading" is done by asking the
+  // parent (AppRoot) to remount this whole component with a fresh React key --
+  // every useState(() => LS.get(...)) initializer re-runs from localStorage, which
+  // achieves the same effect without needing a real browser navigation.
+  var reload = props.onReload;
   useEffect(function() { initStorage(); }, []);
 
   // Auto-load from URL hash on first mount (shared link)
@@ -612,7 +615,7 @@ function SubTrackerApp() {
   // Edit modal for a single planned sub - { subId, minute, playerOffId, playerOnId }
   var _editSub = useState(null); var editSubModal = _editSub[0], setEditSubModal = _editSub[1];
 
-  var _team = useState(function() { return LS.get("st_team", { id:uid(), name:"My Team", season:String(new Date().getFullYear()), coach_name:"", created_at:new Date().toISOString() }); });
+  var _team = useState(function() { return LS.get("st_team", { id:uid(), name:"Demo", season:String(new Date().getFullYear()), coach_name:"", created_at:new Date().toISOString() }); });
   var team = _team[0], setTeamState = _team[1];
 
   // ---- Multi-team support: registry of all cached teams + switcher UI state ----
@@ -621,13 +624,20 @@ function SubTrackerApp() {
   var activeTeamId = (function(){ try { return localStorage.getItem("st_active_team"); } catch(e){ return null; } })();
   var _teamSwitch = useState(false); var teamSwitcherOpen = _teamSwitch[0], setTeamSwitcherOpen = _teamSwitch[1];
   var _newTeamName = useState(""); var newTeamName = _newTeamName[0], setNewTeamName = _newTeamName[1];
+  // Custom in-app confirmation dialog -- window.confirm() is blocked/silently
+  // ignored inside the sandboxed Claude.ai artifact preview iframe, so destructive
+  // actions need their own confirm UI instead of relying on the native browser dialog.
+  var _confirmDlg = useState(null); var confirmDialog = _confirmDlg[0], setConfirmDialog = _confirmDlg[1];
+  function askConfirm(message, onConfirm) {
+    setConfirmDialog({ message: message, onConfirm: onConfirm });
+  }
 
   // Switch the active team and reload, so every piece of state re-initializes
   // from that team's namespaced localStorage data.
   function switchToTeam(id) {
     if (id === activeTeamId) { setTeamSwitcherOpen(false); return; }
     try { localStorage.setItem("st_active_team", id); } catch(e) {}
-    window.location.reload();
+    reload();
   }
 
   // Create a brand-new (empty) team, add it to the registry, and switch to it.
@@ -638,14 +648,17 @@ function SubTrackerApp() {
     LS.set("st_teams_registry", reg);
     try {
       localStorage.setItem("st_team__" + newId, JSON.stringify({ id:newId, name:trimmed, season:String(new Date().getFullYear()), coach_name:"", created_at:new Date().toISOString() }));
-      // Start with an empty roster (no seed players) for a fresh team
-      localStorage.setItem("st_players__" + newId, JSON.stringify([]));
+      // The auto-generated fallback "Demo" team (e.g. created when a user
+      // deletes their last remaining team) gets the same 15 demo players as a
+      // brand-new install. Any other (user-named) new team starts empty.
+      var seedPlayers = trimmed === "Demo" ? SEED_PLAYERS.map(function(p){ return Object.assign({ id:uid(), team_id:newId, active:true }, p); }) : [];
+      localStorage.setItem("st_players__" + newId, JSON.stringify(seedPlayers));
       localStorage.setItem("st_matches__" + newId, JSON.stringify([]));
       localStorage.setItem("st_stints__" + newId, JSON.stringify([]));
       localStorage.setItem("st_events__" + newId, JSON.stringify([]));
       localStorage.setItem("st_active_team", newId);
     } catch(e) {}
-    window.location.reload();
+    reload();
   }
 
   // Delete a cached team's data entirely. Falls back to another cached team, or
@@ -656,11 +669,11 @@ function SubTrackerApp() {
     PER_TEAM_LS_KEYS.forEach(function(k){
       try { localStorage.removeItem(k + "__" + id); } catch(e) {}
     });
-    if (reg.length === 0) { createNewTeam("My Team"); return; }
+    if (reg.length === 0) { createNewTeam("Demo"); return; }
     if (id === activeTeamId) {
       try { localStorage.setItem("st_active_team", reg[0].id); } catch(e) {}
     }
-    window.location.reload();
+    reload();
   }
 
   var _dbPl = useState(function() { return LS.get("st_players", []); });
@@ -723,7 +736,7 @@ function SubTrackerApp() {
   // Which player's position-rating editor is expanded in the Roster tab
   var _editPlayer = useState(null); var editingPlayerId = _editPlayer[0], setEditingPlayerId = _editPlayer[1];
 
-  var _tn = useState(function(){ return (LS.get("st_team",{})||{}).name||"My Team"; }); var teamName = _tn[0], setTeamName = _tn[1];
+  var _tn = useState(function(){ return (LS.get("st_team",{})||{}).name||"Demo"; }); var teamName = _tn[0], setTeamName = _tn[1];
   var _ts = useState(function(){ return (LS.get("st_team",{})||{}).season||String(new Date().getFullYear()); }); var teamSeason = _ts[0], setTeamSeason = _ts[1];
   var _cn = useState(function(){ return (LS.get("st_team",{})||{}).coach_name||""; }); var coachName = _cn[0], setCoachName = _cn[1];
   // Share/import code
@@ -735,6 +748,13 @@ function SubTrackerApp() {
 
   var pitchRef      = useRef(null);
   var intRef        = useRef(null);
+  // Anchors the match clock to a real wall-clock timestamp (epoch ms) + the
+  // matchSecs value at that moment, so the clock can be corrected by ACTUAL
+  // elapsed time rather than just counting how many times setInterval fired.
+  // This matters because mobile browsers (notably iOS Safari/PWA) throttle or
+  // fully suspend JS timers when the screen locks or the tab backgrounds --
+  // without this, time spent locked would just be silently lost from the clock.
+  var timerAnchorRef = useRef(null);
   var touchGhostRef = useRef(null);
   var touchIdRef    = useRef(null);
   var touchSrcRef   = useRef(null);
@@ -777,29 +797,62 @@ function SubTrackerApp() {
     });
   }, [team.id, team.name]);
 
+  // Catch the match clock (and every on-pitch player's accumulated time) up to
+  // however many whole seconds have actually passed in the real world since the
+  // last sync point, rather than assuming exactly 1 second per interval firing.
+  var syncTimer = useCallback(function() {
+    if (!timerAnchorRef.current) return;
+    var now = Date.now();
+    var elapsedSec = Math.floor((now - timerAnchorRef.current.ts) / 1000);
+    if (elapsedSec <= 0) return;
+    // Advance the anchor by exactly the whole seconds consumed, keeping any
+    // sub-second remainder so fractional drift doesn't accumulate over time.
+    timerAnchorRef.current = { ts: timerAnchorRef.current.ts + elapsedSec * 1000 };
+    setMatchSecs(function(s) { return s + elapsedSec; });
+    setPitchState(function(prev) {
+      var next = Object.assign({}, prev);
+      Object.keys(next).forEach(function(pid) {
+        var ps = next[pid];
+        if (!ps.pitchPos) return;
+        var posId = ps.pitchPos;
+        var newPT = Object.assign({}, ps.positionTimes);
+        newPT[posId] = (newPT[posId]||0) + elapsedSec;
+        next[pid] = Object.assign({}, ps, { pitchSecs: ps.pitchSecs+elapsedSec, positionTimes: newPT });
+      });
+      return next;
+    });
+  }, []);
+
   // Tick
   useEffect(function() {
     if (running) {
-      intRef.current = setInterval(function() {
-        setMatchSecs(function(s) {
-          return s + 1;
-        });
-        setPitchState(function(prev) {
-          var next = Object.assign({}, prev);
-          Object.keys(next).forEach(function(pid) {
-            var ps = next[pid];
-            if (!ps.pitchPos) return;
-            var posId = ps.pitchPos;
-            var newPT = Object.assign({}, ps.positionTimes);
-            newPT[posId] = (newPT[posId]||0) + 1;
-            next[pid] = Object.assign({}, ps, { pitchSecs: ps.pitchSecs+1, positionTimes: newPT });
-          });
-          return next;
-        });
-      }, 1000);
-    } else { clearInterval(intRef.current); }
+      timerAnchorRef.current = { ts: Date.now() };
+      intRef.current = setInterval(syncTimer, 1000);
+    } else {
+      clearInterval(intRef.current);
+      timerAnchorRef.current = null;
+    }
     return function() { clearInterval(intRef.current); };
-  }, [running]);
+  }, [running, syncTimer]);
+
+  // Catch up immediately when the tab/screen becomes visible/focused again --
+  // don't wait for the next (possibly delayed) interval tick. This is what
+  // actually fixes the "iPad screen locked, timer fell behind" problem: as soon
+  // as the page is visible again, the clock jumps forward by the real elapsed
+  // time in one go instead of slowly ticking back up to "catch up" (which it
+  // otherwise never would, since setInterval only fires once it resumes and
+  // still only advances by 1 second per firing).
+  useEffect(function() {
+    function handleVisible() { if (!document.hidden) syncTimer(); }
+    document.addEventListener("visibilitychange", handleVisible);
+    window.addEventListener("focus", syncTimer);
+    window.addEventListener("pageshow", syncTimer);
+    return function() {
+      document.removeEventListener("visibilitychange", handleVisible);
+      window.removeEventListener("focus", syncTimer);
+      window.removeEventListener("pageshow", syncTimer);
+    };
+  }, [syncTimer]);
 
   var addEvent = useCallback(function(playerId, eventType, notes, extra) {
     setEvents(function(prev){ return prev.concat([Object.assign({ id:uid(), player_id:playerId, event_type:eventType, match_second:matchSecs, notes:notes||"" }, extra||{})]); });
@@ -980,13 +1033,25 @@ function SubTrackerApp() {
       if (sideMenu) {
         swapPlayers(sideMenu.playerId, pid);
       } else {
-        // Live game: show swap options + edit position
-        var liveItems = [
-          { divider:true, label:"Substitution" },
-          { label:"Select from bench to swap...", onClick:function(){} },
-          { divider:true, label:"" },
-          { label:"Edit position spot", onClick:function(){openPosEditForSlot(posId);} }
-        ];
+        // Live game: show substitution (from bench) + position-swap (with another
+        // on-pitch player) options, plus edit position.
+        var benchItems = onBench.filter(function(p){return !unavailable.has(p.id);}).map(function(p){
+          return { label:"#"+p.jersey_number+" "+p.name, onClick:function(){swapPlayers(p.id,pid);} };
+        });
+        var otherOnPitch = onPitch.filter(function(p){return p.id!==pid;});
+        var swapItems = otherOnPitch.map(function(p){
+          var theirPos = pitchState[p.id] && pitchState[p.id].pitchPos;
+          var theirLabel = posLabelFor(theirPos) || theirPos;
+          return { label:"#"+p.jersey_number+" "+p.name+" ("+theirLabel+")", onClick:function(){swapPitchPos(pid,p.id);} };
+        });
+        var liveItems = [{ divider:true, label:"Substitute (from bench)" }]
+          .concat(benchItems.length > 0 ? benchItems : [{ label:"No bench players available", onClick:function(){} }])
+          .concat([{ divider:true, label:"Swap position with" }])
+          .concat(swapItems.length > 0 ? swapItems : [{ label:"No other players on pitch", onClick:function(){} }])
+          .concat([
+            { divider:true, label:"" },
+            { label:"Edit position spot", onClick:function(){openPosEditForSlot(posId);} }
+          ]);
         setPitchMenu({ pid:pid, x:x, y:y, items:liveItems });
       }
     }
@@ -1012,7 +1077,7 @@ function SubTrackerApp() {
 
   // Drag (mouse)
   function benchDragStart(e,id){ dragIdRef.current=id; dragSrcRef.current="bench"; e.dataTransfer.effectAllowed="move"; e.dataTransfer.setData("text/plain",String(id)); }
-  function pitchDragStart(e,id){ if(!isSetup){e.preventDefault();return;} dragIdRef.current=id; dragSrcRef.current="pitch"; e.dataTransfer.effectAllowed="move"; e.dataTransfer.setData("text/plain",String(id)); }
+  function pitchDragStart(e,id){ dragIdRef.current=id; dragSrcRef.current="pitch"; e.dataTransfer.effectAllowed="move"; e.dataTransfer.setData("text/plain",String(id)); }
   function slotDragOver(e,posId){ e.preventDefault(); setDropHi(posId); }
   function slotDragLeave(){ setDropHi(null); }
   function slotDrop(e,posId){ e.preventDefault(); setDropHi(null); if(dragIdRef.current==null)return; placeOnPitch(dragIdRef.current,posId); dragIdRef.current=null; dragSrcRef.current=null; }
@@ -1023,7 +1088,7 @@ function SubTrackerApp() {
     dragIdRef.current=null; dragSrcRef.current=null;
     if(srcId==null)return;
     if(src==="bench") swapPlayers(srcId,tgtId);
-    else if(src==="pitch"&&isSetup) swapPitchPos(srcId,tgtId);
+    else if(src==="pitch") swapPitchPos(srcId,tgtId);
   }
 
   // Touch drag
@@ -1060,7 +1125,7 @@ function SubTrackerApp() {
         if(t.clientX>=r2.left&&t.clientX<=r2.right&&t.clientY>=r2.top&&t.clientY<=r2.bottom){
           var tgtId=els[i].dataset.pitchPlayer;
           if(source==="bench") swapPlayers(dragId,tgtId);
-          else if(source==="pitch"&&isSetup) swapPitchPos(dragId,tgtId);
+          else if(source==="pitch") swapPitchPos(dragId,tgtId);
           return;
         }
       }
@@ -1550,7 +1615,7 @@ function SubTrackerApp() {
     // into the new team's namespace, clobbering what we just imported above.
     setTimeout(function(){
       try { localStorage.setItem("st_active_team", targetId); } catch(e) {}
-      window.location.reload();
+      reload();
     }, 0);
     return { mode: existing ? "switched" : "created", teamName: targetName };
   }
@@ -2296,7 +2361,7 @@ function SubTrackerApp() {
                       {t.name}{isActive?" (current)":""}
                     </button>
                     {!isActive && (
-                      <button onClick={function(){ if(window.confirm('Delete all cached data for "'+t.name+'"? This cannot be undone.')) deleteTeam(t.id); }}
+                      <button onClick={function(){ askConfirm('Delete all cached data for "'+t.name+'"? This cannot be undone.', function(){ deleteTeam(t.id); }); }}
                         title="Delete this team's cached data"
                         style={{ padding:"8px 10px", border:"none", background:"transparent", color:"#475569", cursor:"pointer", fontSize:12, fontFamily:"inherit" }}>X</button>
                     )}
@@ -2602,14 +2667,14 @@ function SubTrackerApp() {
                       return (
                         <div key={entry.playerId+"-"+entry.fromSec}
                           data-pitch-player={isCurrent ? p.id : undefined}
-                          draggable={isCurrent && isSetup && !posEdit}
+                          draggable={isCurrent && !posEdit}
                           onDragStart={isCurrent ? function(e){if(!posEdit)pitchDragStart(e,p.id);} : undefined}
                           onDragOver={isCurrent ? function(e){if(!posEdit)pitchPlayerDragOver(e);} : undefined}
                           onDrop={isCurrent ? function(e){if(!posEdit)pitchPlayerDrop(e,p.id);} : undefined}
-                          onTouchStart={isCurrent ? function(e){if(posEdit&&isEdP&&!posEdit.menuOnly){startPosEditDrag(e,posEdit.posId);return;}if(isSetup&&!posEdit)handleTouchStart(e,p.id,"pitch");} : undefined}
+                          onTouchStart={isCurrent ? function(e){if(posEdit&&isEdP&&!posEdit.menuOnly){startPosEditDrag(e,posEdit.posId);return;}if(!posEdit)handleTouchStart(e,p.id,"pitch");} : undefined}
                           onClick={isCurrent ? function(e){if(posEdit){if(isEdP){e.stopPropagation();return;}setPosEdit(null);return;}handlePitchClick(e,p.id);} : undefined}
                           style={{ display:"flex", flexDirection:"column", alignItems:"center", opacity:opacity, transition:"opacity 0.2s", marginBottom: idx < entries.length-1 ? 1 : 0,
-                            cursor: isCurrent ? (isEdP&&posEdit&&!posEdit.menuOnly?"grab":isSetup&&!posEdit?"grab":sideMenu?"pointer":"default") : "default" }}>
+                            cursor: isCurrent ? (isEdP&&posEdit&&!posEdit.menuOnly?"grab":!posEdit?"grab":sideMenu?"pointer":"default") : "default" }}>
                           <div style={{ width:isCurrent?34:22, height:isCurrent?34:22, borderRadius:"50%",
                             background: isPast?"#374151" : isFuture?"#0F6E56" : isEdP?"#f59e0b":(sideMenu&&!isSetup)?"#f59e0b":"#1D9E75",
                             border:"2px "+(isFuture?"dashed":"solid")+" "+(isPast?"#4b5563":isFuture?"#1D9E75":isEdP?"#d97706":(sideMenu&&!isSetup)?"#d97706":"#0F6E56"),
@@ -2646,13 +2711,13 @@ function SubTrackerApp() {
                 var isEdP = posEdit && posEdit.posId === pitchState[p.id].pitchPos;
                 return (
                   <div key={p.id} data-pitch-player={p.id}
-                    draggable={isSetup&&!posEdit}
+                    draggable={!posEdit}
                     onDragStart={function(e){if(!posEdit)pitchDragStart(e,p.id);}}
                     onDragOver={function(e){if(!posEdit)pitchPlayerDragOver(e);}}
                     onDrop={function(e){if(!posEdit)pitchPlayerDrop(e,p.id);}}
-                    onTouchStart={function(e){if(posEdit&&isEdP&&!posEdit.menuOnly){startPosEditDrag(e,posEdit.posId);return;}if(isSetup&&!posEdit)handleTouchStart(e,p.id,"pitch");}}
+                    onTouchStart={function(e){if(posEdit&&isEdP&&!posEdit.menuOnly){startPosEditDrag(e,posEdit.posId);return;}if(!posEdit)handleTouchStart(e,p.id,"pitch");}}
                     onClick={function(e){if(posEdit){if(isEdP){e.stopPropagation();return;}setPosEdit(null);return;}handlePitchClick(e,p.id);}}
-                    style={{ position:"absolute", left:pp.x+"%", top:pp.y+"%", transform:"translate(-50%,-50%)", display:"flex", flexDirection:"column", alignItems:"center", cursor:isEdP&&posEdit&&!posEdit.menuOnly?"grab":isSetup&&!posEdit?"grab":sideMenu?"pointer":"default", zIndex:isEdP?21:10, userSelect:"none", WebkitUserSelect:"none" }}>
+                    style={{ position:"absolute", left:pp.x+"%", top:pp.y+"%", transform:"translate(-50%,-50%)", display:"flex", flexDirection:"column", alignItems:"center", cursor:isEdP&&posEdit&&!posEdit.menuOnly?"grab":!posEdit?"grab":sideMenu?"pointer":"default", zIndex:isEdP?21:10, userSelect:"none", WebkitUserSelect:"none" }}>
                     <div style={{ width:34, height:34, borderRadius:"50%", background:isEdP?"#f59e0b":(sideMenu&&!isSetup)?"#f59e0b":"#1D9E75", border:"3px solid "+(isEdP?"#d97706":(sideMenu&&!isSetup)?"#d97706":"#0F6E56"), display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontWeight:700, fontSize:12, boxShadow:"0 2px 10px rgba(0,0,0,0.5)", transition:"all 0.15s" }}>{p.jersey_number}</div>
                     <div style={{ marginTop:2, background:"rgba(0,0,0,0.78)", color:"white", fontSize:9, fontWeight:600, padding:"2px 5px", borderRadius:4, whiteSpace:"nowrap", maxWidth:62, overflow:"hidden", textOverflow:"ellipsis" }}>{p.name.split(" ")[0]}</div>
                     <div style={{ fontSize:8, color:"#a7f3d0", background:"rgba(0,0,0,0.6)", padding:"1px 4px", borderRadius:3, marginTop:1, fontVariantNumeric:"tabular-nums" }}>{fmtTime((pitchState[p.id]&&pitchState[p.id].pitchSecs)||0)}</div>
@@ -4560,6 +4625,58 @@ function SubTrackerApp() {
               var a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"})); a.download="subtracker-export.json"; a.click();
             }} style={{ padding:"8px 14px", borderRadius:8, border:"none", background:"#334155", color:"#f1f5f9", fontWeight:700, cursor:"pointer", fontSize:12, fontFamily:"inherit" }}>Export JSON</button>
           </div>
+
+          <div style={{ background:"#1e293b", borderRadius:10, padding:16, border:"1px solid #7f1d1d", marginTop:14 }}>
+            <div style={{ fontSize:12, fontWeight:700, marginBottom:6, color:"#f87171" }}>Danger zone</div>
+            <div style={{ fontSize:11, color:"#64748b", marginBottom:10 }}>These actions cannot be undone. Consider exporting your data first.</div>
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+              <button onClick={function(){
+                askConfirm("This will clear the cached roster, plan, and history for the CURRENT team (\""+team.name+"\") on this device and start it fresh. Other cached teams are not affected. This cannot be undone. Continue?", function(){
+                  try { PER_TEAM_LS_KEYS.forEach(function(k){ localStorage.removeItem(k + "__" + activeTeamId); }); } catch(e) {}
+                  reload();
+                });
+              }} style={{ padding:"8px 14px", borderRadius:8, border:"1px solid #7f1d1d", background:"transparent", color:"#f87171", fontWeight:700, cursor:"pointer", fontSize:12, fontFamily:"inherit" }}>
+                Reset this team's data
+              </button>
+              <button onClick={function(){
+                askConfirm("This will clear ALL cached teams and data on this device (every team's roster, plan, and history) and start completely fresh, recreating the default Demo team. This cannot be undone. Continue?", function(){
+                  try {
+                    var keysToRemove = [];
+                    for (var i = 0; i < localStorage.length; i++) {
+                      var k = localStorage.key(i);
+                      if (k && k.indexOf("st_") === 0) keysToRemove.push(k);
+                    }
+                    keysToRemove.forEach(function(k){ localStorage.removeItem(k); });
+                  } catch(e) {}
+                  reload();
+                });
+              }} style={{ padding:"8px 14px", borderRadius:8, border:"1px solid #7f1d1d", background:"rgba(127,29,29,0.2)", color:"#fca5a5", fontWeight:700, cursor:"pointer", fontSize:12, fontFamily:"inherit" }}>
+                Clear ALL data on this device
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom confirm dialog -- window.confirm() is blocked/silently ignored in
+          the sandboxed Claude.ai artifact preview iframe, so destructive actions
+          use this in-app modal instead. */}
+      {confirmDialog && (
+        <div onClick={function(){setConfirmDialog(null);}} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.65)", zIndex:500, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div onClick={function(e){e.stopPropagation();}} style={{ background:"#1e293b", border:"1px solid #7f1d1d", borderRadius:12, padding:20, maxWidth:380, width:"100%", boxShadow:"0 16px 48px rgba(0,0,0,0.7)" }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#fca5a5", marginBottom:10 }}>Are you sure?</div>
+            <div style={{ fontSize:12, color:"#cbd5e1", lineHeight:1.6, marginBottom:18 }}>{confirmDialog.message}</div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={function(){ var fn = confirmDialog.onConfirm; setConfirmDialog(null); if (fn) fn(); }}
+                style={{ flex:1, padding:"9px", borderRadius:8, border:"none", background:"#dc2626", color:"white", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
+                Yes, continue
+              </button>
+              <button onClick={function(){setConfirmDialog(null);}}
+                style={{ flex:1, padding:"9px", borderRadius:8, border:"1px solid #334155", background:"transparent", color:"#94a3b8", fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -4573,7 +4690,7 @@ function SubTrackerApp() {
 class SubTrackerErrorBoundary extends Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, pendingAction: null };
   }
   static getDerivedStateFromError() {
     return { hasError: true };
@@ -4582,21 +4699,21 @@ class SubTrackerErrorBoundary extends Component {
     try { console.error("SubTracker crashed:", error, info); } catch(e) {}
   }
   render() {
-    if (!this.state.hasError) return <SubTrackerApp />;
+    if (!this.state.hasError) return <SubTrackerApp onReload={this.props.onReload} />;
 
+    var self = this;
+    var reload = this.props.onReload;
     var activeId = null;
     try { activeId = localStorage.getItem("st_active_team"); } catch(e) {}
 
     function resetThisTeam() {
-      if (!window.confirm("This will clear the cached roster, plan, and history for the current team on this device and start it fresh. Other cached teams are not affected. This cannot be undone. Continue?")) return;
       try {
         PER_TEAM_LS_KEYS.forEach(function(k){ localStorage.removeItem(k + "__" + activeId); });
       } catch(e) {}
-      window.location.reload();
+      reload();
     }
 
     function resetEverything() {
-      if (!window.confirm("This will clear ALL cached teams and data on this device and start completely fresh. This cannot be undone. Continue?")) return;
       try {
         var keysToRemove = [];
         for (var i = 0; i < localStorage.length; i++) {
@@ -4605,8 +4722,10 @@ class SubTrackerErrorBoundary extends Component {
         }
         keysToRemove.forEach(function(k){ localStorage.removeItem(k); });
       } catch(e) {}
-      window.location.reload();
+      reload();
     }
+
+    var pending = this.state.pendingAction;
 
     return (
       <div style={{ minHeight:"100vh", background:"#0f172a", color:"#f1f5f9", display:"flex", alignItems:"center", justifyContent:"center", padding:20, fontFamily:"system-ui, -apple-system, sans-serif" }}>
@@ -4616,23 +4735,53 @@ class SubTrackerErrorBoundary extends Component {
           <div style={{ fontSize:12, color:"#94a3b8", marginBottom:20, lineHeight:1.6 }}>
             This is usually caused by data saved by a previous version of the app that's no longer compatible with this version. Try reloading first -- if that doesn't help, you can reset the cached data and start fresh.
           </div>
+
+          {pending ? (
+            <div style={{ background:"#0f172a", border:"1px solid #7f1d1d", borderRadius:10, padding:14, marginBottom:8, textAlign:"left" }}>
+              <div style={{ fontSize:12, color:"#fca5a5", fontWeight:700, marginBottom:4 }}>Are you sure?</div>
+              <div style={{ fontSize:11, color:"#94a3b8", marginBottom:12, lineHeight:1.5 }}>
+                {pending === "team" ? "This will clear the cached roster, plan, and history for the current team on this device. Other cached teams are not affected." : "This will clear ALL cached teams and data on this device."} This cannot be undone.
+              </div>
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={function(){ if (pending === "team") resetThisTeam(); else resetEverything(); }} style={{ flex:1, padding:"8px", borderRadius:8, border:"none", background:"#dc2626", color:"white", fontWeight:700, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
+                  Yes, reset
+                </button>
+                <button onClick={function(){ self.setState({ pendingAction:null }); }} style={{ flex:1, padding:"8px", borderRadius:8, border:"1px solid #334155", background:"transparent", color:"#94a3b8", fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-            <button onClick={function(){ window.location.reload(); }} style={{ padding:"10px 14px", borderRadius:8, border:"none", background:"#1D9E75", color:"white", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
+            <button onClick={function(){ reload(); }} style={{ padding:"10px 14px", borderRadius:8, border:"none", background:"#1D9E75", color:"white", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
               Reload
             </button>
-            <button onClick={resetThisTeam} style={{ padding:"10px 14px", borderRadius:8, border:"1px solid #334155", background:"transparent", color:"#f1f5f9", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
+            <button onClick={function(){ self.setState({ pendingAction:"team" }); }} style={{ padding:"10px 14px", borderRadius:8, border:"1px solid #334155", background:"transparent", color:"#f1f5f9", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
               Reset this team's data and start fresh
             </button>
-            <button onClick={resetEverything} style={{ padding:"10px 14px", borderRadius:8, border:"1px solid #334155", background:"transparent", color:"#f87171", fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
+            <button onClick={function(){ self.setState({ pendingAction:"all" }); }} style={{ padding:"10px 14px", borderRadius:8, border:"1px solid #334155", background:"transparent", color:"#f87171", fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
               Reset ALL cached teams on this device
             </button>
           </div>
+          )}
         </div>
       </div>
     );
   }
 }
 
+// AppRoot owns a "reload key": bumping it forces React to fully unmount and
+// remount the error boundary + app below, which re-runs every
+// useState(() => LS.get(...)) initializer fresh from localStorage. This stands
+// in for window.location.reload(), which is restricted/can hang inside the
+// sandboxed Claude.ai artifact preview iframe (a real browser navigation isn't
+// available there), but works identically well in a normal deployed site too.
+function AppRoot() {
+  var _rk = useState(0); var reloadKey = _rk[0], setReloadKey = _rk[1];
+  function forceReload() { setReloadKey(function(k){ return k + 1; }); }
+  return <SubTrackerErrorBoundary key={reloadKey} onReload={forceReload} />;
+}
+
 export default function SubTracker() {
-  return <SubTrackerErrorBoundary />;
+  return <AppRoot />;
 }
